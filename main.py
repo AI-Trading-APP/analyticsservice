@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import requests
 from enum import Enum
+import os
 
 app = FastAPI(
     title="Analytics Service",
@@ -14,18 +15,21 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# CORS configuration from environment
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configuration
-PORTFOLIO_SERVICE_URL = "http://localhost:8004"
-PAPER_TRADING_SERVICE_URL = "http://localhost:8005"
+# Service URLs from environment
+PORTFOLIO_SERVICE_URL = os.getenv("PORTFOLIO_SERVICE_URL", "http://localhost:8004")
+PAPER_TRADING_SERVICE_URL = os.getenv("PAPER_TRADING_SERVICE_URL", "http://localhost:8005")
 
 # Models
 class TimeFrame(str, Enum):
@@ -73,6 +77,13 @@ class AnalyticsResponse(BaseModel):
     portfolio_value: float
 
 # Helper functions
+def sanitize_float(value: float, default: float = 0.0) -> float:
+    """Replace NaN and Inf with default value for JSON serialization"""
+    import math
+    if math.isnan(value) or math.isinf(value):
+        return default
+    return value
+
 def fetch_portfolio_data():
     """Fetch portfolio data from Portfolio Service"""
     try:
@@ -87,7 +98,9 @@ def fetch_transactions():
     try:
         response = requests.get(f"{PORTFOLIO_SERVICE_URL}/api/portfolio/transactions")
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        # Portfolio Service returns {"transactions": [...]}
+        return data.get("transactions", [])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch transactions: {str(e)}")
 
@@ -178,7 +191,7 @@ async def root():
         "service": "Analytics Service",
         "version": "1.0.0",
         "status": "running",
-        "port": 8007
+        "port": 9007
     }
 
 @app.get("/health")
@@ -272,31 +285,31 @@ async def get_performance_analytics(timeframe: TimeFrame):
     calmar_ratio = annualized_return / max_dd if max_dd > 0 else 0
 
     performance = PerformanceMetrics(
-        total_return=float(total_return),
-        annualized_return=float(annualized_return),
-        sharpe_ratio=float(sharpe),
-        sortino_ratio=float(sortino),
-        max_drawdown=float(max_dd),
+        total_return=sanitize_float(total_return),
+        annualized_return=sanitize_float(annualized_return),
+        sharpe_ratio=sanitize_float(sharpe),
+        sortino_ratio=sanitize_float(sortino),
+        max_drawdown=sanitize_float(max_dd),
         max_drawdown_duration=int(dd_duration),
-        win_rate=float(win_rate),
-        profit_factor=float(profit_factor),
-        average_win=float(avg_win),
-        average_loss=float(avg_loss),
+        win_rate=sanitize_float(win_rate),
+        profit_factor=sanitize_float(profit_factor),
+        average_win=sanitize_float(avg_win),
+        average_loss=sanitize_float(avg_loss),
         total_trades=total_trades,
         winning_trades=win_count,
         losing_trades=loss_count,
         current_streak=current_streak,
-        best_trade=float(best_trade),
-        worst_trade=float(worst_trade)
+        best_trade=sanitize_float(best_trade),
+        worst_trade=sanitize_float(worst_trade)
     )
 
     risk = RiskMetrics(
-        value_at_risk_95=float(var_95),
-        value_at_risk_99=float(var_99),
-        conditional_var_95=float(cvar_95),
-        volatility=float(volatility),
-        downside_deviation=float(downside_deviation),
-        calmar_ratio=float(calmar_ratio)
+        value_at_risk_95=sanitize_float(var_95),
+        value_at_risk_99=sanitize_float(var_99),
+        conditional_var_95=sanitize_float(cvar_95),
+        volatility=sanitize_float(volatility),
+        downside_deviation=sanitize_float(downside_deviation),
+        calmar_ratio=sanitize_float(calmar_ratio)
     )
 
     return AnalyticsResponse(
@@ -483,5 +496,5 @@ async def get_monthly_returns(year: int):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8007)
+    uvicorn.run(app, host="0.0.0.0", port=9007)
 
